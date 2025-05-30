@@ -36,6 +36,7 @@ class App:
         self._set_up_input_systems()
 
         self._create_assets()
+        
 
     def _set_up_glfw(self) -> None:
         """
@@ -50,9 +51,12 @@ class App:
             GLFW_CONSTANTS.GLFW_OPENGL_CORE_PROFILE)
         glfw.window_hint(GLFW_CONSTANTS.GLFW_OPENGL_FORWARD_COMPAT, GLFW_CONSTANTS.GLFW_TRUE)
         #for uncapped framerate
-        glfw.window_hint(GLFW_CONSTANTS.GLFW_DOUBLEBUFFER,GL_FALSE) 
+        glfw.window_hint(GLFW_CONSTANTS.GLFW_DOUBLEBUFFER,GL_FALSE)
+        # make the window resizable
+        glfw.window_hint(GLFW_CONSTANTS.GLFW_RESIZABLE, glfw.TRUE)
         self.window = glfw.create_window(
             SCREEN_WIDTH, SCREEN_HEIGHT, "Title", None, None)
+        glfw.set_window_size_callback(self.window, self._on_window_resize)
         glfw.make_context_current(self.window)
     
     def _set_up_timer(self) -> None:
@@ -130,6 +134,10 @@ class App:
         self.renderer = GraphicsEngine()
 
         self.scene = Scene()
+
+    def _on_window_resize(self, window, width, height):
+        glViewport(0, 0, width, height)
+        self.renderer.resize(width, height)
     
     def run(self) -> None:
         """
