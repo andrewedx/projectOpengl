@@ -16,13 +16,15 @@ class GraphicsEngine:
     """
         Draws entities and stuff.
     """
-    __slots__ = ("meshes", "materials", "shaders", "skybox_mesh", "skybox_shader", "skybox", "shadow_fbo", "shadow_depth_texture", "shadow_width", "shadow_height", "shadows_enabled")
-
+    __slots__ = ("meshes", "materials", "shaders", "skybox_mesh", "skybox_shader", "skybox", "shadow_fbo", "shadow_depth_texture", "shadow_width", "shadow_height", "shadows_enabled", "window_width", "window_height")
 
     def __init__(self):
         """
             Initializes the rendering system.
         """
+
+        self.window_width = SCREEN_WIDTH
+        self.window_height = SCREEN_HEIGHT
 
         self._set_up_opengl()
 
@@ -74,7 +76,7 @@ class GraphicsEngine:
             ENTITY_TYPE["MEDKIT"]: RectMesh(w = 0.6, h = 0.5),
             ENTITY_TYPE["POINTLIGHT"]: RectMesh(w = 0.2, h = 0.1),
         }
-        self.meshes[ENTITY_TYPE["CUBE"]] = MultiMaterialMesh("models/amphi.obj")
+        self.meshes[ENTITY_TYPE["CUBE"]] = MultiMaterialMesh("models/assembler.obj")
 
         self.materials: dict[int, Material] = {
             # ENTITY_TYPE["CUBE"]: Material(monkey_model.texture_path),
@@ -96,9 +98,9 @@ class GraphicsEngine:
             Some shader data only needs to be set once.
         """
 
+        ratio = self.window_width / self.window_height
         projection_transform = pyrr.matrix44.create_perspective_projection(
-            fovy = 45, aspect = 640/480, 
-            near = 0.1, far = 1000, dtype=np.float32
+            fovy=45, aspect=ratio, near=0.1, far=1000, dtype=np.float32
         )
 
         for shader in self.shaders.values():
@@ -196,8 +198,62 @@ class GraphicsEngine:
 )
 
         return pyrr.matrix44.multiply(light_view, light_proj)
+    
+    def _update_projection_matrices(self) -> None:
+        aspect = self.window_width / self.window_height
+        projection = pyrr.matrix44.create_perspective_projection(
+            fovy=45, aspect=aspect, near=0.1, far=1000, dtype=np.float32
+        )
+        for shader in self.shaders.values():
+            shader.use()
+            loc = glGetUniformLocation(shader.program, "projection")
+            if loc != -1:  # Only update if the shader uses this uniform
+                glUniformMatrix4fv(loc, 1, GL_FALSE, projection)
 
 
+
+    def _recreate_shadow_map(self, width: int, height: int) -> None:
+        # Delete old framebuffer and texture
+        glDeleteFramebuffers(1, [self.shadow_fbo])
+        glDeleteTextures(1, [self.shadow_depth_texture])
+
+        self.shadow_width = width
+        self.shadow_height = height
+
+        # Generate framebuffer
+        self.shadow_fbo = glGenFramebuffers(1)
+        glBindFramebuffer(GL_FRAMEBUFFER, self.shadow_fbo)
+
+        # Generate depth texture
+        self.shadow_depth_texture = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, self.shadow_depth_texture)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
+                    self.shadow_width, self.shadow_height, 0,
+                    GL_DEPTH_COMPONENT, GL_FLOAT, None)
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER)
+
+        border_color = [1.0, 1.0, 1.0, 1.0]
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border_color)
+
+        # Attach depth texture to framebuffer
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                            GL_TEXTURE_2D, self.shadow_depth_texture, 0)
+
+        glDrawBuffer(GL_NONE)
+        glReadBuffer(GL_NONE)
+
+        # Unbind framebuffer
+        glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+    def resize(self, width: int, height: int) -> None:
+        self.window_width = width
+        self.window_height = height
+        self._update_projection_matrices()
+        self._recreate_shadow_map(width, height)
     
     def render(self, 
         camera: Camera, 
@@ -248,7 +304,7 @@ class GraphicsEngine:
                         mesh.draw()
 
             glBindFramebuffer(GL_FRAMEBUFFER, 0)
-            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
+            glViewport(0, 0, self.window_width, self.window_height)
 
         else:
             light_space_matrix = np.identity(4, dtype=np.float32)
@@ -336,8 +392,9 @@ class GraphicsEngine:
         skybox_view = pyrr.matrix44.create_from_matrix33(
             pyrr.matrix33.create_from_matrix44(view)
         )
+        aspect = self.window_width / self.window_height
         projection = pyrr.matrix44.create_perspective_projection(
-            fovy=45, aspect=640/480, near=0.1, far=1000
+            fovy=45, aspect=aspect, near=0.1, far=1000
         )
 
         glUniformMatrix4fv(
